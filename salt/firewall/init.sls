@@ -17,34 +17,6 @@ iptables_fix_docker:
     - name: DOCKER-USER
     - table: filter
 
-# Add the Forward Rule since Docker ripped it out
-iptables_fix_fwd:
-  iptables.insert:
-    - table: filter
-    - chain: FORWARD
-    - jump: ACCEPT
-    - position: 1
-    - target: DOCKER-USER
-
-# Allow related/established sessions
-iptables_allow_established:
-  iptables.append:
-    - table: filter
-    - chain: INPUT
-    - jump: ACCEPT
-    - match: conntrack
-    - ctstate: 'RELATED,ESTABLISHED'
-    - save: True
-
-# I like pings
-iptables_allow_pings:
-  iptables.append:
-    - table: filter
-    - chain: INPUT
-    - jump: ACCEPT
-    - proto: icmp
-    - save: True
-
 # Create the chain for logging
 iptables_LOGGING_chain:
   iptables.chain_present:
@@ -52,56 +24,69 @@ iptables_LOGGING_chain:
     - table: filter
     - family: ipv4
 
+insert_blockreplace_start_and_end:
+  cmd.run:
+    - name: "LN=$(egrep -n 'filter|COMMIT' /etc/sysconfig/iptables | grep -A1 filter | grep COMMIT | awk -F: {'print $1'}) && sed -i \"$LN i# END SALT BLOCKREPLACE ZONE\" /etc/sysconfig/iptables && sed -i  \"$LN i# START SALT BLOCKREPLACE ZONE\" /etc/sysconfig/iptables"
+    - unless: grep "START SALT BLOCKREPLACE ZONE" /etc/sysconfig/iptables
+    
+# Add the Forward Rule since Docker ripped it out
+iptables_fix_fwd:
+  file.accumulated:
+    - filename: /etc/sysconfig/iptables
+    - text: "-A FORWARD -j DOCKER-USER"
+    - require_in:
+      - file: iptables_file
+
+# Allow related/established sessions
+iptables_allow_established:
+  file.accumulated:
+    - filename: /etc/sysconfig/iptables
+    - text: "-A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT"
+    - require_in:
+      - file: iptables_file
+
+# I like pings
+iptables_allow_pings:
+  file.accumulated:
+    - filename: /etc/sysconfig/iptables
+    - text: "-A INPUT -p icmp -j ACCEPT"
+    - require_in:
+      - file: iptables_file
+
 iptables_LOGGING_limit:
-  iptables.append:
-    - table: filter
-    - chain: LOGGING
-    - match: limit
-    - jump: LOG
-    - limit: 2/min
-    - log-level: 4
-    - log-prefix: "IPTables-dropped: "
+  file.accumulated:
+    - filename: /etc/sysconfig/iptables
+    - text: '-A LOGGING -m limit --limit 2/min -j LOG --log-prefix "IPTables-dropped: "'
+    - require_in:
+      - file: iptables_file
 
 # Make the input policy send stuff that doesn't match to be logged and dropped
 iptables_log_input_drops:
-  iptables.append:
-    - table: filter
-    - chain: INPUT
-    - jump: LOGGING
-    - save: True
+  file.accumulated:
+    - filename: /etc/sysconfig/iptables
+    - text: "-A INPUT -j LOGGING"
+    - require_in:
+      - file: iptables_file
 
 # Enable global DOCKER-USER block rule
 enable_docker_user_fw_policy:
-  iptables.insert:
-    - table: filter
-    - chain: DOCKER-USER
-    - jump: LOGGING
-    - in-interface: '!docker0'
-    - out-interface: docker0
-    - position: 1
-    - save: True
+  file.accumulated:
+    - filename: /etc/sysconfig/iptables
+    - text: "-A DOCKER-USER ! -i docker0 -o docker0 -j LOGGING"
+    - require_in:
+      - file: iptables_file
 
 enable_docker_user_established:
-  iptables.insert:
-    - table: filter
-    - chain: DOCKER-USER
-    - jump: ACCEPT
-    - in-interface: '!docker0'
-    - out-interface: docker0
-    - position: 1
-    - save: True
-    - match: conntrack
-    - ctstate: 'RELATED,ESTABLISHED'
-
-insert_blockreplace_start_and_end:
-  cmd.run:
-    - name: "LN=$(egrep -n 'filter|COMMIT' /etc/sysconfig/iptables | grep -A1 filter | grep COMMIT | awk -F: {'print $1'}) && sed -i '$LNi# START SALT BLOCKREPLACE ZONE\n# END SALT BLOCKREPLACE ZONE' /etc/sysconfig/iptables"
-    - unless: grep "START SALT BLOCKREPLACE ZONE" /etc/sysconfig/iptables
+  file.accumulated:
+    - filename: /etc/sysconfig/iptables
+    - text: "-A DOCKER-USER ! -i docker0 -o docker0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT"
+    - require_in:
+      - file: iptables_file
 
 {% set count = namespace(value=0) %}
 {% for chain, hg in assigned_hostgroups.chain.items() %}
   {% for hostgroup, portgroups in assigned_hostgroups.chain[chain].hostgroups.items() %}
-    {% for action in ['insert', 'delete' ] %}
+    {% for action in ['insert'] %}
       {% if hostgroups[hostgroup].ips[action] %}
         {% for ip in hostgroups[hostgroup].ips[action] %}
           {% for portgroup in portgroups.portgroups %}
@@ -109,7 +94,6 @@ insert_blockreplace_start_and_end:
               {% for port in ports %}
                 {% set count.value = count.value + 1 %}
 
-# NEED TO HANDLE DELETE ACTIONS STILL
 {{action}}_{{chain}}_{{hostgroup}}_{{ip}}_{{port}}_{{proto}}_{{count.value}}:
   file.accumulated:
     - filename: /etc/sysconfig/iptables
@@ -133,14 +117,6 @@ iptables_drop_all_the_things_accumulator:
     - text: "-A LOGGING -j DROP"
     - require_in:
       - file: iptables_file
-
-
-#add_commit_accumulator:
-#  file.accumulated:
-#    - filename: /etc/sysconfig/iptables
-#    - text: "COMMIT"
-#    - require_in:
-#      - file: iptables_file
 
 iptables_file:
   file.blockreplace:
