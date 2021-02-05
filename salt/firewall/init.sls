@@ -28,7 +28,7 @@ insert_blockreplace_start_and_end:
   cmd.run:
     - name: "LN=$(egrep -n 'filter|COMMIT' /etc/sysconfig/iptables | grep -A1 filter | grep COMMIT | awk -F: {'print $1'}) && sed -i \"$LN i# END SALT BLOCKREPLACE ZONE\" /etc/sysconfig/iptables && sed -i  \"$LN i# START SALT BLOCKREPLACE ZONE\" /etc/sysconfig/iptables"
     - unless: grep "START SALT BLOCKREPLACE ZONE" /etc/sysconfig/iptables
-    
+
 # Add the Forward Rule since Docker ripped it out
 iptables_fix_fwd:
   file.accumulated:
@@ -125,18 +125,23 @@ iptables_file:
     - marker_end: "# END SALT BLOCKREPLACE ZONE"
 
 flush_iptables:
-    iptables.flush:
-        - table: filter
-        - family: ipv4
-        - onchanges:
-            - file: iptables_file
+  iptables.flush:
+    - table: filter
+    - family: ipv4
+    - onchanges:
+      - file: iptables_file
 
 restore_iptables:
-    cmd.run:
-        - name: "iptables-restore < /etc/sysconfig/iptables"
-        - onchanges:
-            - file: iptables_file
+  cmd.run:
+    - name: "iptables-restore < /etc/sysconfig/iptables"
+    - onchanges:
+      - file: iptables_file
 
+save_iptables:
+  cmd.run:
+    - name: "iptables-save > /etc/sysconfig/iptables"
+    - onchanges:
+      - file: iptables_file
 
 {% else %}
 
