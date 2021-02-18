@@ -16,7 +16,6 @@
 {% if sls in allowed_states %}
 
 {% set interface = salt['pillar.get']('sensor:interface', 'bond0') %}
-{% set ZEEKVER = salt['pillar.get']('global:mdengine', '') %}
 {% set VERSION = salt['pillar.get']('global:soversion', 'HH1.2.2') %}
 {% set IMAGEREPO = salt['pillar.get']('global:imagerepo') %}
 {% set MANAGER = salt['grains.get']('master') %}
@@ -64,9 +63,10 @@ surilogdir:
 
 suridatadir:
   file.directory:
-    - name: /nsm/suricata
+    - name: /nsm/suricata/extracted
     - user: 940
     - group: 939
+    - makedirs: True
 
 surirulesync:
   file.recurse:
@@ -147,6 +147,7 @@ so-suricata:
       - /opt/so/conf/suricata/rules:/etc/suricata/rules:ro
       - /opt/so/log/suricata/:/var/log/suricata/:rw
       - /nsm/suricata/:/nsm/:rw
+      - /nsm/suricata/extracted:/var/log/suricata//filestore:rw
       - /opt/so/conf/suricata/bpf:/etc/suricata/bpf:ro
     - network_mode: host
     - watch:
